@@ -1,59 +1,62 @@
-from paddleocr import PaddleOCR
 import cv2
 import numpy as np
 from PIL import Image
 import logging
+from paddleocr import PaddleOCR
+from typing import Tuple, List, Dict
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize PaddleOCR once (lazy loading)
 _ocr_instance = None
 
-def get_ocr_instance():
+def get_ocr_instance() -> PaddleOCR:
     global _ocr_instance
     if _ocr_instance is None:
         _ocr_instance = PaddleOCR(
-            lang="fr",
+            lang="fr",            # Utilisez "fr" pour le français (ajustez si besoin)
             use_angle_cls=True,
-            show_log=False  # Disable verbose logging
+            show_log=False,
+            drop_score=0.5        # Filtre pour ignorer les résultats à faible confiance
         )
     return _ocr_instance
 
-def perform_ocr(image: Image.Image) -> str:
+def perform_ocr(image: Image.Image) -> Tuple[str, List[Dict]]:
     """
-    Perform OCR on a PIL Image using PaddleOCR
-    
-    Args:
-        image: PIL Image to process
-    
-    Returns:
-        Extracted text as a single string
+    Effectue l'OCR sur une image PIL en utilisant PaddleOCR et renvoie le texte extrait et les métadonnées.
+
+    Retourne:
+        (texte_extrait, metadata) où metadata est une liste de dictionnaires avec les informations (texte, confiance, position).
     """
     try:
-        # Convert PIL Image to OpenCV format (BGR)
         img_array = np.array(image)
-        if len(img_array.shape) == 2:  # Grayscale
+        if len(img_array.shape) == 2:
             img_array = cv2.cvtColor(img_array, cv2.COLOR_GRAY2BGR)
-        else:  # RGB
+        else:
             img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
         
-        # Get OCR instance and process image
         ocr = get_ocr_instance()
         result = ocr.ocr(img_array, cls=True)
         
-        # Extract and concatenate text
         extracted_text = []
+        text_metadata = []
+        
         if result and result[0]:
             for line in result[0]:
                 if line and len(line) >= 2:
-                    text = line[1][0]
+                    text, conf = line[1]
                     if text.strip():
                         extracted_text.append(text.strip())
+                        text_metadata.append({
+                            "text": text.strip(),
+                            "confidence": float(conf),
+                            "position": [tuple(map(float, point)) for point in line[0]]
+                        })
         
-        return "\n".join(extracted_text) if extracted_text else "Aucun texte détecté."
+        return (
+            "\n".join(extracted_text) if extracted_text else "Aucun texte détecté.",
+            text_metadata
+        )
     
     except Exception as e:
-        logger.error(f"OCR failed: {str(e)}")
-        return f"Erreur OCR: {str(e)}"
+        logger.error(f"OCR Error: {str(e)}")
+        return f"Erreur OCR: {str(e)}", []
